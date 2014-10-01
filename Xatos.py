@@ -6,7 +6,7 @@ from os import path, linesep
 from fileinput import (input as fi_input, close as fi_close)
 from re import compile as re_compile
 from subprocess import check_output as sp_co
-from sys import argv as sys_argv
+from sys import (argv as sys_argv, getfilesystemencoding as getfsencoding)
 
 __author__ = 'Xiao Wang, linhan.wx'
 
@@ -31,7 +31,7 @@ class Xatos(object):
 
     @staticmethod
     def get_abs_path(a_path):
-        abs_path = path.abspath(a_path)
+        abs_path = path.abspath(a_path.decode(getfsencoding()))
         if path.exists(abs_path):
             return abs_path
         else:
