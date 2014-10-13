@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from os import path, linesep
 from fileinput import (input as fi_input, close as fi_close)
 from re import compile as re_compile
-from subprocess import check_output as sp_co
+from subprocess import (check_output as sp_co, CalledProcessError)
 from sys import (argv as sys_argv, getfilesystemencoding as getfsencoding)
 
 __author__ = 'Xiao Wang, linhan.wx'
@@ -23,8 +23,8 @@ class Xatos(object):
 
     def __init__(self, crashlog_path, dsym_or_app_path):
         self.crashlog_path = self.get_abs_path(crashlog_path)
-        self.dsym_or_app_path = self.get_abs_path(dsym_or_app_path)
         self.get_crashlog_info()
+        self.dsym_or_app_path = self.get_dsym_path(dsym_or_app_path)
         self.bin_line_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+'.format(self.bin_name))
         # self.slide_addr = self.get_slide_addr()
         self.load_addr_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+\+\s+\d+'.format(self.bin_name))
@@ -35,7 +35,13 @@ class Xatos(object):
         if path.exists(abs_path):
             return abs_path
         else:
-            raise SystemExit('File not found: {}'.format(abs_path))
+            raise SystemExit('ERROR:: File not found: {}'.format(abs_path))
+
+    def get_dsym_path(self, a_path):
+        abs_path = self.get_abs_path(a_path)
+        if abs_path.lower().endswith('.dsym'):
+            abs_path = path.join(abs_path, 'Contents','Resources','DWARF', self.bin_name)
+        return abs_path
 
     def desymbolicate_file(self):
         desym_result = self.desymbolicate()
@@ -61,8 +67,7 @@ class Xatos(object):
             raise SystemExit('Cannot find crash app binary image info')
         bin_img_info = [i for i in bin_img_line.rstrip().split() if i and i != '-']
         self.load_addr, end_laddr, bin_name, bin_arch, bin_uuid, bin_path = bin_img_info
-        if bin_uuid.startswith('<') and bin_uuid.endswith('>'):
-            self.bin_uuid = bin_uuid[1:-1]
+        self.bin_uuid = bin_uuid.strip('<>')
         self.bin_name = bin_name
         self.bin_uuid = bin_uuid
         self.bin_arch = bin_arch
@@ -80,15 +85,19 @@ class Xatos(object):
             result = self.load_addr_ptn.findall(line)
             if result:
                 stack_addr, load_addr = result[0]
-                assert load_addr == self.load_addr, 'Crashlog is invalid, load address is not the same'
+                assert load_addr == self.load_addr, 'ERROR:: Crashlog is invalid, load address is not the same'
             else:
                 stack_addr = line_header.group(1)
-                assert self.load_addr is not None, 'Cannot get load address'
+                assert self.load_addr is not None, 'ERROR:: Cannot get load address'
             all_stack_addr.append(stack_addr)
         atos_cmd = ['xcrun', 'atos', '-o', self.dsym_or_app_path, '-l', self.load_addr, '-arch', self.bin_arch]
         atos_cmd.extend(all_stack_addr)
-        dsymed = [i for i in sp_co(atos_cmd).split(linesep) if i]
-        assert len(lines) == len(dsymed), 'Crashlog desymbolicate error!'
+        try:
+            dsymed = [i for i in sp_co(atos_cmd).split(linesep) if i]
+        except CalledProcessError as cpe:
+            raise SystemExit('ERROR:: '+cpe.output)
+
+        assert len(lines) == len(dsymed), 'ERROR:: Crashlog desymbolicate error!'
         for idx, line in enumerate(lines):
             desym_result[line] = '{}{}'.format(self.bin_line_ptn.search(line).group(), dsymed[idx])
         return desym_result
@@ -109,7 +118,7 @@ class Xatos(object):
             if cmd_segment and segname_text:
                 if 'vmaddr' in line:
                     return line.split()[1]
-        raise SystemExit('cannot get binary image slide address')
+        raise SystemExit('ERROR:: cannot get binary image slide address')
 
 
 def main():
