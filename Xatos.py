@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from __future__ import unicode_literals
-from os import path, linesep
+from os import path, linesep, environ
 from fileinput import (input as fi_input, close as fi_close)
 from re import compile as re_compile
 from subprocess import (check_output as sp_co, CalledProcessError)
@@ -28,6 +28,7 @@ class Xatos(object):
         self.bin_line_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+'.format(self.bin_name))
         # self.slide_addr = self.get_slide_addr()
         self.load_addr_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+\+\s+\d+'.format(self.bin_name))
+        self.__env = environ.copy()
 
     @staticmethod
     def get_abs_path(a_path):
@@ -40,10 +41,11 @@ class Xatos(object):
     def get_dsym_path(self, a_path):
         abs_path = self.get_abs_path(a_path)
         if abs_path.lower().endswith('.dsym'):
-            abs_path = path.join(abs_path, 'Contents','Resources','DWARF', self.bin_name)
+            abs_path = path.join(abs_path, 'Contents', 'Resources', 'DWARF', self.bin_name)
         return abs_path
 
     def desymbolicate_file(self):
+        self.symbolicatecrash()
         desym_result = self.desymbolicate()
         for line in fi_input(self.crashlog_path, backup='.dbak', inplace=1):
             if line in desym_result.keys():
@@ -51,7 +53,41 @@ class Xatos(object):
             else:
                 print line.rstrip()
         fi_close()
+        print "desymbolicated log saved to '{}', original log saved to '{}'".format(self.crashlog_path,
+                                                                                    self.crashlog_path + '.dbak')
 
+    def symbolicatecrash(self):
+        '''use symbolicatecrash when dSYM file available'''
+        try:
+            sp_co(['which','xcodebuild'])
+            self.__dev_dir = sp_co(['xcode-select', '-p']).rstrip()
+        except CalledProcessError as cpe:
+            print cpe.output
+            print 'WARNING:: Xcode not installed, using "atos" instead of "symbolicatecrash"'
+        else:
+            self.__symbolicatecrash_path = self.get_symbolicatecrash_path()
+            if not self.__env.get('DEVELOPER_DIR'):
+                self.__env['DEVELOPER_DIR'] = self.__dev_dir
+            if '.dsym' in self.dsym_or_app_path.lower():
+                try:
+                    output = sp_co([self.__symbolicatecrash_path, self.crashlog_path, self.dsym_or_app_path], env=self.__env)
+                    with open(self.crashlog_path, 'w') as f:
+                        f.write(output)
+                except CalledProcessError:
+                    print 'WARNING:: symbolicatecrash failed, will use "atos" only'
+
+    def get_symbolicatecrash_path(self):
+        if self.__dev_dir:
+            xcode_version_list = sp_co(['xcodebuild', '-version']).rstrip().split()
+            xcode_verion = xcode_version_list[xcode_version_list.index('Xcode') + 1]
+            if xcode_verion < '4.3':
+                return '/Developer/Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKit.framework/Versions/A/Resources/symbolicatecrash'
+            elif xcode_verion < '5':
+                return path.join(self.__dev_dir, 'Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKit.framework/Versions/A/Resources/symbolicatecrash')
+            elif xcode_verion < '6':
+                return path.join(self.__dev_dir, 'Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKitBase.framework/Versions/A/Resources/symbolicatecrash')
+            else:
+                return path.join(path.dirname(self.__dev_dir),'SharedFrameworks/DTDeviceKitBase.framework/Versions/A/Resources/symbolicatecrash')
 
     def get_crashlog_info(self):
         bin_img_line_flag = False
@@ -95,7 +131,7 @@ class Xatos(object):
         try:
             dsymed = [i for i in sp_co(atos_cmd).split(linesep) if i]
         except CalledProcessError as cpe:
-            raise SystemExit('ERROR:: '+cpe.output)
+            raise SystemExit('ERROR:: ' + cpe.output)
 
         assert len(lines) == len(dsymed), 'ERROR:: Crashlog desymbolicate error!'
         for idx, line in enumerate(lines):
@@ -123,10 +159,10 @@ class Xatos(object):
 
 def main():
     if len(sys_argv) != 3:
-        raise SystemExit("""Xatos.py path/to/crashlog.crash path/to/dSYM/binary/or/app/binary
+        raise SystemExit("""Xatos.py path/to/crashlog.crash path/to/dSYM/or/app/binary
 Example:
  1) Xatos.py "MyApp_1986-1-1_Sean-teki-iPhone.crash" "Payload/MyApp.app/MyApp"
- 2) Xatos.py "MyApp_1995-6-1_Noelani-teki-iPad.ips" "MyApp.app.dSYM/Contents/Resources/DWARF/MyApp"
+ 2) Xatos.py "MyApp_1995-6-1_Noelani-teki-iPad.ips" "MyApp.app.dSYM"
         """)
     else:
         Xatos(sys_argv[1], sys_argv[2]).desymbolicate_file()
