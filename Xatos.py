@@ -104,7 +104,7 @@ class Xatos(object):
         bin_img_info = [i for i in bin_img_line.rstrip().split() if i and i != '-']
         self.load_addr, end_laddr, bin_name, bin_arch, bin_uuid, bin_path = bin_img_info
         self.bin_uuid = bin_uuid.strip('<>')
-        self.bin_name = bin_name
+        self.bin_name = bin_name.replace('+', '')
         self.bin_uuid = bin_uuid
         self.bin_arch = bin_arch
 
