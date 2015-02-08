@@ -26,8 +26,12 @@ class Xatos(object):
         self.get_crashlog_info()
         self.dsym_or_app_path = self.get_dsym_path(dsym_or_app_path)
         self.bin_line_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+'.format(self.bin_name))
-        # self.slide_addr = self.get_slide_addr()
+        self.slide_addr = self.get_slide_addr()
+        print 'slide_addr',self.slide_addr
+        # load addr example: 17  AliTrip     0x0002b56e 0x21000 + 42350
         self.load_addr_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+\+\s+\d+'.format(self.bin_name))
+        # stack addr example: 2   AliTrip    0x00000001003dc6d8 curl_multi_setopt (in AliTrip) + 788
+        self.stack_decimal_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+.+\+\s+(\d+)'.format(self.bin_name))
         self.__env = environ.copy()
 
     @staticmethod
@@ -115,24 +119,32 @@ class Xatos(object):
                 if self.bin_line_ptn.search(line):
                     desym_result.setdefault(line)
         all_stack_addr = []
+        all_symbol_addr = []
         lines = desym_result.keys()
+        stack_decimal_ptn = False
         for line in lines:
-            line_header = self.bin_line_ptn.search(line)
-            result = self.load_addr_ptn.findall(line)
-            if result:
-                stack_addr, load_addr = result[0]
+            load_addr_result = self.load_addr_ptn.findall(line)
+            if load_addr_result:
+                stack_addr, load_addr = load_addr_result[0]
+                all_stack_addr.append(stack_addr)
                 assert load_addr == self.load_addr, 'ERROR:: Crashlog is invalid, load address is not the same'
-            else:
-                stack_addr = line_header.group(1)
+            stack_addr_result = self.stack_decimal_ptn.findall(line)
+            if stack_addr_result:
+                stack_decimal_ptn = True
+                stack_addr, decimal_sum = stack_addr_result[0]
                 assert self.load_addr is not None, 'ERROR:: Cannot get load address'
-            all_stack_addr.append(stack_addr)
-        atos_cmd = ['xcrun', 'atos', '-o', self.dsym_or_app_path, '-l', self.load_addr, '-arch', self.bin_arch]
-        atos_cmd.extend(all_stack_addr)
+                symbol_addr = hex(int(self.slide_addr,16)+int(stack_addr,16)-int(self.load_addr,16))
+                all_symbol_addr.append(symbol_addr)
+        if stack_decimal_ptn:
+            atos_cmd = ['xcrun', 'atos', '-o', self.dsym_or_app_path, '-arch', self.bin_arch]
+            atos_cmd.extend(all_symbol_addr)
+        else:
+            atos_cmd = ['xcrun', 'atos', '-o', self.dsym_or_app_path, '-l', self.load_addr, '-arch', self.bin_arch]
+            atos_cmd.extend(all_stack_addr)
         try:
             dsymed = [i for i in sp_co(atos_cmd).split(linesep) if i]
         except CalledProcessError as cpe:
             raise SystemExit('ERROR:: ' + cpe.output)
-
         assert len(lines) == len(dsymed), 'ERROR:: Crashlog desymbolicate error!'
         for idx, line in enumerate(lines):
             desym_result[line] = '{}{}'.format(self.bin_line_ptn.search(line).group(), dsymed[idx])
