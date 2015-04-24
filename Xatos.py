@@ -11,23 +11,14 @@ from sys import (argv as sys_argv, getfilesystemencoding as getfsencoding)
 __author__ = 'Xiao Wang, linhan.wx'
 
 class Xatos(object):
-    """
-    http://stackoverflow.com/a/13576028/562154
-    symbol address = slide + stack address - load address
-    The slide value is the value of vmaddr in LC_SEGMENT cmd (Mostly this is 0x1000). Run the following to get it:
-    xcrun -sdk iphoneos otool -arch ARCHITECTURE -l "APP_BUNDLE/APP_EXECUTABLE"  | grep -A 10 "LC_SEGMENT" | grep -A 8 "__TEXT"|grep vmaddr
-    Replace ARCHITECTURE with the actual architecture the crash report shows, e.g. armv7. Replace APP_BUNDLE/APP_EXECUTABLE with the path to the actual executable.
-    The stack address is the hex value from the crash report.
-    The load address is the first address showing in the Binary Images section at the very front of the line which contains your executable. (Usually the first entry).
-    """
 
     def __init__(self, crashlog_path, dsym_or_app_path):
         self.crashlog_path = self.get_abs_path(crashlog_path)
         self.get_crashlog_info()
         self.dsym_or_app_path = self.get_dsym_path(dsym_or_app_path)
-        self.bin_line_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+'.format(self.bin_name))
+        self.bin_line_head_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+.*(?!:\d+\))'.format(self.bin_name))
+        self.bin_line_tail_ptn = re_compile(':\d+\)')
         self.slide_addr = self.get_slide_addr()
-        print 'slide_addr',self.slide_addr
         # load addr example: 17  AliTrip     0x0002b56e 0x21000 + 42350
         self.load_addr_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+\+\s+\d+'.format(self.bin_name))
         # stack addr example: 2   AliTrip    0x00000001003dc6d8 curl_multi_setopt (in AliTrip) + 788
@@ -116,7 +107,7 @@ class Xatos(object):
         desym_result = {}
         with open(self.crashlog_path) as crash_fp:
             for line in crash_fp:
-                if self.bin_line_ptn.search(line):
+                if self.bin_line_head_ptn.search(line) and not self.bin_line_tail_ptn.search(line):
                     desym_result.setdefault(line)
         all_stack_addr = []
         all_symbol_addr = []
@@ -130,6 +121,15 @@ class Xatos(object):
                 assert load_addr == self.load_addr, 'ERROR:: Crashlog is invalid, load address is not the same'
             stack_addr_result = self.stack_decimal_ptn.findall(line)
             if stack_addr_result:
+                """
+                http://stackoverflow.com/a/13576028/562154
+                symbol address = slide + stack address - load address
+                The slide value is the value of vmaddr in LC_SEGMENT cmd (Mostly this is 0x1000). Run the following to get it:
+                xcrun -sdk iphoneos otool -arch ARCHITECTURE -l "APP_BUNDLE/APP_EXECUTABLE"  | grep -A 10 "LC_SEGMENT" | grep -A 8 "__TEXT"|grep vmaddr
+                Replace ARCHITECTURE with the actual architecture the crash report shows, e.g. armv7. Replace APP_BUNDLE/APP_EXECUTABLE with the path to the actual executable.
+                The stack address is the hex value from the crash report.
+                The load address is the first address showing in the Binary Images section at the very front of the line which contains your executable. (Usually the first entry).
+                """
                 stack_decimal_ptn = True
                 stack_addr, decimal_sum = stack_addr_result[0]
                 assert self.load_addr is not None, 'ERROR:: Cannot get load address'
@@ -145,9 +145,10 @@ class Xatos(object):
             dsymed = [i for i in sp_co(atos_cmd).split(linesep) if i]
         except CalledProcessError as cpe:
             raise SystemExit('ERROR:: ' + cpe.output)
-        assert len(lines) == len(dsymed), 'ERROR:: Crashlog desymbolicate error!'
+        if len(lines) != len(dsymed):
+            raise SystemExit('ERROR:: Crashlog desymbolicate error!')
         for idx, line in enumerate(lines):
-            desym_result[line] = '{}{}'.format(self.bin_line_ptn.search(line).group(), dsymed[idx])
+            desym_result[line] = '{}{}'.format(self.bin_line_head_ptn.search(line).group(), dsymed[idx])
         return desym_result
 
     def get_slide_addr(self):
