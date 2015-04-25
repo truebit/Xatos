@@ -10,12 +10,17 @@ from sys import (argv as sys_argv, getfilesystemencoding as getfsencoding)
 
 __author__ = 'Xiao Wang, linhan.wx'
 
-class Xatos(object):
 
+class Xatos(object):
     def __init__(self, crashlog_path, dsym_or_app_path):
         self.crashlog_path = self.get_abs_path(crashlog_path)
         self.get_crashlog_info()
         self.dsym_or_app_path = self.get_dsym_path(dsym_or_app_path)
+        arm_uuid_dict = self.get_arm_uuid()
+        if arm_uuid_dict.get(self.bin_arch) != self.bin_uuid:
+            raise SystemExit(
+                "ERROR: UUID in crashlog and binary (dSYM/app) are not consistent:{}Crashlog: ({}) {}{}Binary: ({}) {}".format(
+                    linesep, self.bin_arch, self.bin_uuid, linesep, self.bin_arch, arm_uuid_dict.get(self.bin_arch)))
         self.bin_line_head_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+.*(?!:\d+\))'.format(self.bin_name))
         self.bin_line_tail_ptn = re_compile(':\d+\)')
         self.slide_addr = self.get_slide_addr()
@@ -39,6 +44,21 @@ class Xatos(object):
             abs_path = path.join(abs_path, 'Contents', 'Resources', 'DWARF', self.bin_name)
         return abs_path
 
+    def get_arm_uuid(self):
+        uuid_arm_ptn = re_compile('([A-F0-9-]+) \((.+)\)')
+        arm_uuid_dict = {}
+        try:
+            output = sp_co(['dwarfdump', '-u', self.dsym_or_app_path])
+        except CalledProcessError as cpe:
+            raise SystemExit(cpe.output)
+        for i in output.splitlines():
+            match = uuid_arm_ptn.search(i)
+            if match:
+                uuid, arm = match.groups()
+                lower_uuid = uuid.replace('-', '').lower()
+                arm_uuid_dict[arm] = lower_uuid
+        return arm_uuid_dict
+
     def desymbolicate_file(self):
         self.symbolicatecrash()
         desym_result = self.desymbolicate()
@@ -54,7 +74,7 @@ class Xatos(object):
     def symbolicatecrash(self):
         '''use symbolicatecrash when dSYM file available'''
         try:
-            sp_co(['which','xcodebuild'])
+            sp_co(['which', 'xcodebuild'])
             self.__dev_dir = sp_co(['xcode-select', '-p']).rstrip()
         except CalledProcessError as cpe:
             print cpe.output
@@ -65,7 +85,8 @@ class Xatos(object):
                 self.__env['DEVELOPER_DIR'] = self.__dev_dir
             if '.dsym' in self.dsym_or_app_path.lower():
                 try:
-                    output = sp_co([self.__symbolicatecrash_path, self.crashlog_path, self.dsym_or_app_path], env=self.__env)
+                    output = sp_co([self.__symbolicatecrash_path, self.crashlog_path, self.dsym_or_app_path],
+                                   env=self.__env)
                     with open(self.crashlog_path, 'w') as f:
                         f.write(output)
                 except CalledProcessError:
@@ -78,11 +99,14 @@ class Xatos(object):
             if xcode_verion < '4.3':
                 return '/Developer/Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKit.framework/Versions/A/Resources/symbolicatecrash'
             elif xcode_verion < '5':
-                return path.join(self.__dev_dir, 'Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKit.framework/Versions/A/Resources/symbolicatecrash')
+                return path.join(self.__dev_dir,
+                                 'Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKit.framework/Versions/A/Resources/symbolicatecrash')
             elif xcode_verion < '6':
-                return path.join(self.__dev_dir, 'Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKitBase.framework/Versions/A/Resources/symbolicatecrash')
+                return path.join(self.__dev_dir,
+                                 'Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKitBase.framework/Versions/A/Resources/symbolicatecrash')
             else:
-                return path.join(path.dirname(self.__dev_dir),'SharedFrameworks/DTDeviceKitBase.framework/Versions/A/Resources/symbolicatecrash')
+                return path.join(path.dirname(self.__dev_dir),
+                                 'SharedFrameworks/DTDeviceKitBase.framework/Versions/A/Resources/symbolicatecrash')
 
     def get_crashlog_info(self):
         bin_img_line_flag = False
@@ -100,7 +124,6 @@ class Xatos(object):
         self.load_addr, end_laddr, bin_name, bin_arch, bin_uuid, bin_path = bin_img_info
         self.bin_uuid = bin_uuid.strip('<>')
         self.bin_name = bin_name.replace('+', '')
-        self.bin_uuid = bin_uuid
         self.bin_arch = bin_arch
 
     def desymbolicate(self):
@@ -133,7 +156,7 @@ class Xatos(object):
                 stack_decimal_ptn = True
                 stack_addr, decimal_sum = stack_addr_result[0]
                 assert self.load_addr is not None, 'ERROR:: Cannot get load address'
-                symbol_addr = hex(int(self.slide_addr,16)+int(stack_addr,16)-int(self.load_addr,16))
+                symbol_addr = hex(int(self.slide_addr, 16) + int(stack_addr, 16) - int(self.load_addr, 16))
                 all_symbol_addr.append(symbol_addr)
         if stack_decimal_ptn:
             atos_cmd = ['xcrun', 'atos', '-o', self.dsym_or_app_path, '-arch', self.bin_arch]
