@@ -21,7 +21,7 @@ class Xatos(object):
             raise SystemExit(
                 "ERROR: UUID in crashlog and binary (dSYM/app) are not consistent:{}Crashlog: ({}) {}{}Binary: ({}) {}".format(
                     linesep, self.bin_arch, self.bin_uuid, linesep, self.bin_arch, arm_uuid_dict.get(self.bin_arch)))
-        self.bin_line_head_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+.*(?!:\d+\))'.format(self.bin_name))
+        self.bin_line_head_ptn = re_compile('^\d+\s+{}\s+(0x[0-9a-f]+)\s+'.format(self.bin_name))
         self.bin_line_tail_ptn = re_compile(':\d+\)')
         self.slide_addr = self.get_slide_addr()
         # load addr example: 17  AliTrip     0x0002b56e 0x21000 + 42350
@@ -165,7 +165,7 @@ class Xatos(object):
             atos_cmd = ['xcrun', 'atos', '-o', self.dsym_or_app_path, '-l', self.load_addr, '-arch', self.bin_arch]
             atos_cmd.extend(all_stack_addr)
         try:
-            dsymed = [i for i in sp_co(atos_cmd).split(linesep) if i]
+            dsymed = [i for i in sp_co(atos_cmd).splitlines() if i]
         except CalledProcessError as cpe:
             raise SystemExit('ERROR:: ' + cpe.output)
         if len(lines) != len(dsymed):
