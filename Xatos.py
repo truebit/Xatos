@@ -113,9 +113,12 @@ class Xatos(object):
         bin_img_line = ''
         with open(self.crashlog_path) as crash_fp:
             for line in crash_fp:
+                line = line.strip('\r\n')
+                if not line:
+                    continue
                 if bin_img_line_flag:
                     bin_img_line = line
-                    bin_img_line_flag = False
+                    break
                 if 'Binary Images:' in line:
                     bin_img_line_flag = True
         if not bin_img_line:
