@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from __future__ import unicode_literals
+from __future__ import unicode_literals, print_function
 from os import path, linesep, environ
 from fileinput import (input as fi_input, close as fi_close)
 from re import compile as re_compile
@@ -10,6 +10,7 @@ from sys import (argv as sys_argv, getfilesystemencoding as getfsencoding)
 
 __author__ = 'Xiao Wang, linhan.wx'
 
+print_ng = lambda *args, **kwargs: print(*[unicode(i).encode(getfsencoding()) for i in args], **kwargs)
 
 class Xatos(object):
     def __init__(self, crashlog_path, dsym_or_app_path):
@@ -48,7 +49,7 @@ class Xatos(object):
         uuid_arm_ptn = re_compile('([A-F0-9-]+) \((.+)\)')
         arm_uuid_dict = {}
         try:
-            output = sp_co(['dwarfdump', '-u', self.dsym_or_app_path])
+            output = sp_co(['dwarfdump', '-u', self.dsym_or_app_path]).decode(getfsencoding())
         except CalledProcessError as cpe:
             raise SystemExit(cpe.output)
         for i in output.splitlines():
@@ -64,21 +65,21 @@ class Xatos(object):
         desym_result = self.desymbolicate()
         for line in fi_input(self.crashlog_path, backup='.dbak', inplace=1):
             if line in desym_result.keys():
-                print desym_result[line]
+                print_ng(desym_result[line])
             else:
-                print line.rstrip()
+                print_ng(line.rstrip())
         fi_close()
-        print "desymbolicated log saved to '{}', original log saved to '{}'".format(self.crashlog_path,
-                                                                                    self.crashlog_path + '.dbak')
+        print_ng("desymbolicated log saved to '",self.crashlog_path,"', original log saved to '",self.crashlog_path + '.dbak',"'",sep='')
+
 
     def symbolicatecrash(self):
         '''use symbolicatecrash when dSYM file available'''
         try:
             sp_co(['which', 'xcodebuild'])
-            self.__dev_dir = sp_co(['xcode-select', '-p']).rstrip()
+            self.__dev_dir = sp_co(['xcode-select', '-p']).decode(getfsencoding()).rstrip()
         except CalledProcessError as cpe:
-            print cpe.output
-            print 'WARNING:: Xcode not installed, using "atos" instead of "symbolicatecrash"'
+            print_ng(cpe.output)
+            print_ng('WARNING:: Xcode not installed, using "atos" instead of "symbolicatecrash"')
         else:
             self.__symbolicatecrash_path = self.get_symbolicatecrash_path()
             if not self.__env.get('DEVELOPER_DIR'):
@@ -86,15 +87,15 @@ class Xatos(object):
             if '.dsym' in self.dsym_or_app_path.lower():
                 try:
                     output = sp_co([self.__symbolicatecrash_path, self.crashlog_path, self.dsym_or_app_path],
-                                   env=self.__env)
+                                   env=self.__env).decode(getfsencoding())
                     with open(self.crashlog_path, 'w') as f:
-                        f.write(output)
+                        f.write(output.encode(getfsencoding()))
                 except CalledProcessError:
-                    print 'WARNING:: symbolicatecrash failed, will use "atos" only'
+                    print_ng('WARNING:: symbolicatecrash failed, will use "atos" only')
 
     def get_symbolicatecrash_path(self):
         if self.__dev_dir:
-            xcode_version_list = sp_co(['xcodebuild', '-version']).rstrip().split()
+            xcode_version_list = sp_co(['xcodebuild', '-version']).decode(getfsencoding()).rstrip().split()
             xcode_verion = xcode_version_list[xcode_version_list.index('Xcode') + 1]
             if xcode_verion < '4.3':
                 return '/Developer/Platforms/iPhoneOS.platform/Developer/Library/PrivateFrameworks/DTDeviceKit.framework/Versions/A/Resources/symbolicatecrash'
@@ -113,7 +114,7 @@ class Xatos(object):
         bin_img_line = ''
         with open(self.crashlog_path) as crash_fp:
             for line in crash_fp:
-                line = line.strip('\r\n')
+                line = line.decode(getfsencoding()).strip()
                 if not line:
                     continue
                 if bin_img_line_flag:
@@ -133,6 +134,7 @@ class Xatos(object):
         desym_result = {}
         with open(self.crashlog_path) as crash_fp:
             for line in crash_fp:
+                line = line.decode(getfsencoding())
                 if self.bin_line_head_ptn.search(line) and not self.bin_line_tail_ptn.search(line):
                     desym_result.setdefault(line)
         all_stack_addr = []
@@ -168,7 +170,7 @@ class Xatos(object):
             atos_cmd = ['xcrun', 'atos', '-o', self.dsym_or_app_path, '-l', self.load_addr, '-arch', self.bin_arch]
             atos_cmd.extend(all_stack_addr)
         try:
-            dsymed = [i for i in sp_co(atos_cmd).splitlines() if i]
+            dsymed = [i for i in sp_co(atos_cmd).decode(getfsencoding()).splitlines() if i]
         except CalledProcessError as cpe:
             raise SystemExit('ERROR:: ' + cpe.output)
         if len(lines) != len(dsymed):
@@ -179,8 +181,8 @@ class Xatos(object):
 
     def get_slide_addr(self):
         otool_cmd = ['xcrun', 'otool', '-arch', self.bin_arch, '-l', self.dsym_or_app_path]
-        output = sp_co(otool_cmd)
-        lines = [i.rstrip() for i in output.split('\n') if i]
+        output = sp_co(otool_cmd).decode(getfsencoding())
+        lines = [i.strip() for i in output.splitlines() if i]
         cmd_segment = False
         segname_text = False
         for line in lines:
