@@ -7,6 +7,7 @@ from fileinput import (input as fi_input, close as fi_close)
 from re import compile as re_compile
 from subprocess import (check_output as sp_co, CalledProcessError)
 from sys import (argv as sys_argv, getfilesystemencoding as getfsencoding)
+from codecs import open
 
 __author__ = 'Xiao Wang, linhan.wx'
 
@@ -88,8 +89,8 @@ class Xatos(object):
                 try:
                     output = sp_co([self.__symbolicatecrash_path, self.crashlog_path, self.dsym_or_app_path],
                                    env=self.__env).decode(getfsencoding())
-                    with open(self.crashlog_path, 'w') as f:
-                        f.write(output.encode(getfsencoding()))
+                    with open(self.crashlog_path, 'w',encoding=getfsencoding()) as f:
+                        f.write(output)
                 except CalledProcessError:
                     print_ng('WARNING:: symbolicatecrash failed, will use "atos" only')
 
@@ -112,9 +113,9 @@ class Xatos(object):
     def get_crashlog_info(self):
         bin_img_line_flag = False
         bin_img_line = ''
-        with open(self.crashlog_path) as crash_fp:
+        with open(self.crashlog_path, encoding=getfsencoding()) as crash_fp:
             for line in crash_fp:
-                line = line.decode(getfsencoding()).strip()
+                line = line.strip()
                 if not line:
                     continue
                 if bin_img_line_flag:
@@ -132,7 +133,7 @@ class Xatos(object):
 
     def desymbolicate(self):
         desym_result = {}
-        with open(self.crashlog_path) as crash_fp:
+        with open(self.crashlog_path, encoding=getfsencoding()) as crash_fp:
             for line in crash_fp:
                 line = line.decode(getfsencoding())
                 if self.bin_line_head_ptn.search(line) and not self.bin_line_tail_ptn.search(line):
